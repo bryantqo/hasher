@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CodePipeline infrastructure to support cross account CloudFormation Deploys
+Parameters:
+  Client:
+    Type: String
+    Description: Who is the client on for this application?
+    Default: timmons
+  ApplicationName:
+    Type: String
+    Description: What is the name of the application?
+    Default: sam-ple
+  CmkKeyArn:
+    Type: String
+    Description: ARN of the CMK key created for this pipeline. Needs to be created prior to running this stack and then updated after stack creation.
+    Default: arn:aws:kms:us-east-1:930156663175:key/872e6b85-492b-4549-b305-ab7ed4c01076
+  DeployAccountId:
+    Type: String
+    Description: The AWS Account ID that will deploy into this bucket
+    Default: "930156663175"
+  TimmonsAccount:
+    Type: String
+    Description: Which Timmons Group account is being deployed?
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - uat
+      - prod
+      - common
+Mappings:
+  Environments:
+      dev:
+        env: dev
+      qa:
+        env: qa
+      uat:
+        env: uat
+      prod:
+        env: production
+      common:
+        env: common
+Resources:
+  BuildBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${Client}-${ApplicationName}-${TimmonsAccount}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      Tags:
+        - Key: "Client"
+          Value: !Ref Client
+        - Key: "Application"
+          Value: !Ref ApplicationName
+
+  BuildBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BuildBucket
+      PolicyDocument:
+        Statement:
+          - Sid: "AllowDeploy"
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:PutObject'
+              - 's3:PutObjectAcl'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${BuildBucket}/*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${DeployAccountId}:root'
+          - Sid: "AllowDeploy"
+            Action:
+              - 's3:*'
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${BuildBucket}/*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: "AllowPublicReadForStatic"
+            Action:
+              - 's3:GetObject'
+            Effect: Allow
+            Principal: "*"
+            Resource: !Sub 'arn:aws:s3:::${BuildBucket}/*'
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:
+        !Sub '${Client}-${ApplicationName}-${TimmonsAccount}'
+      Tags:
+        - Key: 'Client'
+          Value: !Ref Client
+        - Key: 'Environment'
+          Value: !FindInMap 
+            - Environments
+            - !Ref TimmonsAccount
+            - env
+        - Key: 'Application'
+          Value: !Ref ApplicationName
+      RepositoryPolicyText: 
+        Version: '2012-10-17'
+        Statement: 
+          - 
+            Sid: Allow Cross Push
+            Effect: Allow
+            Principal: 
+              AWS: 
+                - !Sub 'arn:aws:iam::${DeployAccountId}:root'
+            Action: #Noah probably gonna kill me
+              - 'ecr:*'
+Outputs:
+  EcrRepositoryArn:
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Client}-${ApplicationName}-${TimmonsAccount}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ECRREPOSITORY'

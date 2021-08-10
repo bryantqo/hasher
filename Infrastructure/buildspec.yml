@@ -1,0 +1,22 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Restore started on `date`
+      - dotnet restore Backend/WebAPI/WebAPI.csproj
+  build:
+    commands:
+      - echo Build started on `date`
+      - dotnet publish -c release -o ./api Backend/WebAPI/WebAPI.csproj
+      - echo "Listing files in database deployment."
+      - find ./Backend/Database\ Deployment/
+      - dotnet publish -c release -o ./api/database "./Backend/Database Deployment/DatabaseDeployment.csproj"
+      - cp Infrastructure/buildspec-bundle.yml ./api/buildspec.yml
+      - mkdir -p ./api/Docker
+      - cp ./Docker/* ./api/Docker/
+      - find ./api
+artifacts:
+    base-directory: api
+    files:
+        - "**/*"

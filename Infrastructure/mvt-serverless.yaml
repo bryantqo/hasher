@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Multi level base path mapping
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Domian name for api
+  SSMPath:
+    Type: String
+    Description: Base path in SSM the api will read config from
+  SecurityGroup1:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for API (To access rds?)
+  SecurityGroup2:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for API (To access rds?)
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for api (To access rds?)
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for api (To access rds?)
+
+Globals:
+  Function:
+    Handler: index.handler
+    Runtime: nodejs14.x
+  Api:
+    BinaryMediaTypes:
+    - application~1octet-stream
+
+Resources:
+  
+  MVTMapping: #Creates the mapping for MVT Hosting
+    Type: AWS::ApiGatewayV2::ApiMapping
+    DependsOn: MVTAPIProdStage
+    Properties: 
+      ApiId: !Ref MVTAPI
+      ApiMappingKey: mapping/mvt
+      DomainName: !Ref DomainName
+      Stage: Prod
+
+  MVTAPI: # MVT endpoint
+    Type: AWS::Serverless::Api
+    Properties:
+      Description: !Sub "Mapbox Vector Tiles Provider for ${DomainName}"
+      StageName: Prod
+      Cors:
+        AllowMethods: "'POST, GET'"
+        AllowOrigin: "'*'" #TODO set this to a real url
+        MaxAge: "'600'"
+      EndpointConfiguration:
+        Type: REGIONAL
+      BinaryMediaTypes: 
+      - application~1octet-stream
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          version: 0.0.0
+          title: !Sub "Mapbox Vector Tiles Provider for ${DomainName}"
+        basePath: '/'
+        schemes: 
+        - 'https'
+        paths:
+          /{layer}/{z}/{x}/{y}:
+            get:
+              produces:
+              - "application/json"
+              responses: {}
+              parameters:
+                - in: path
+                  name: layer
+                  schema:
+                    type: string
+                  required: true
+                  description: Layer to get a tile of
+                - in: path
+                  name: z
+                  schema:
+                    type: integer
+                  required: true
+                  description: Tile Zoom
+                - in: path
+                  name: x
+                  schema:
+                    type: integer
+                  required: true
+                  description: Tile X coordinate
+                - in: path
+                  name: y
+                  schema:
+                    type: integer
+                  required: true
+                  description: Tile y coordinate
+              x-amazon-apigateway-integration:
+                uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MVTFunction.Arn}/invocations' # api-gateway-arn using Fn::Join
+                responses: {}
+                passthroughBehavior: "when_no_match"
+                httpMethod: "POST"
+                contentHandling: "CONVERT_TO_TEXT"
+                type: "aws_proxy"
+        x-amazon-apigateway-binary-media-types:
+        - "application/octet-stream"
+
+  MVTFunction:  # MVT function
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../mvt-serverless/src
+      Timeout: 20
+      Events:
+        MVTRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MVTAPI
+            Method: GET
+            Path: /{layer}/{z}/{x}/{y}
+      Environment:
+        Variables:
+          SSMPath: !Ref SSMPath
+      VpcConfig:
+        SecurityGroupIds:
+            - !Ref SecurityGroup1
+            - !Ref SecurityGroup2
+        SubnetIds:
+            - !Ref Subnet1
+            - !Ref Subnet2
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+            - 'ssm:GetParametersByPath'
+            - 'ssm:GetParameter'
+          Resource:
+            - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}' 
+            - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}*' 
+          Sid: PropertiesAccess
+  

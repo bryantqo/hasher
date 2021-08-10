@@ -1,0 +1,14 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "hasher-dev"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1qb5eix4j3x62"
+s3_prefix = "hasher-dev"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+parameter_overrides = "DomainName=\"hasher.cloud.fndream.com\" ZoneId=\"Z09161511MIPMRHGRBDHU\" CertArn=\"arn:aws:acm:us-east-1:282555922778:certificate/ad4ad993-918d-4910-bd37-843cc777580e\" SecurityGroup1=\"sg-09139c862e8703d83\" SecurityGroup2=\"sg-0f22c3f1da74aa834\" Subnet1=\"subnet-0c3c5145143c6f483\" Subnet2=\"subnet-01ce8ba87f32ebdec\" SSMPath=\"/hasher/api/\" PoolID=\"us-east-1_I51vhCW3G\""
+tags = "client=\"utah\" application=\"ultra\" environment=\"dev\""
+image_repositories = []
+profile = "personal"

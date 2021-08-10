@@ -1,0 +1,38 @@
+version: 0.2
+phases:
+    pre_build:
+        commands:
+            - echo Restore started on `date`
+            - mkdir -p /dist/
+            - mkdir -p /dist/api
+            - mkdir -p /dist/static
+            - cp ./Docker/Dockerfile /dist/Dockerfile
+            - ver=$(cat $CODEBUILD_SRC_DIR_FrontendBuild/package.json | grep "version" | sed 's/^.*\x3a "//;s/".*$//')
+            - BUILD_TAG="v${ver}.${CODEBUILD_BUILD_NUMBER}"
+            - echo "Using build tag ${BUILD_TAG}"
+            - sed "s/__TAG__/${BUILD_TAG}/g" ./Docker/imagedefinitions.json > ./Docker/imagedefinitions.qa.json
+            - sed "s/__TAG__/${BUILD_TAG}/g" ./Docker/imagedefinitions.json > ./Docker/imagedefinitions.dev.json
+            - cp ./Docker/imagedefinitions.dev.json /dist/imagedefinitions.dev.json
+            - cp ./Docker/imagedefinitions.qa.json /dist/imagedefinitions.qa.json
+            - ls
+            - ls /dist/
+    build:
+        commands:
+            - echo "Build started on `date` with tag ${BUILD_TAG} bn ${CODEBUILD_BUILD_NUMBER}"
+            - cp ./*.dll /dist/api/
+            - cp ./*.json /dist/api/
+            - cp ./*.config /dist/api/
+            - cp ./*.config /dist/api/
+            - cp ./database /dist/api/ -r
+#            - cp $CODEBUILD_SRC_DIR_APIBuild/* /dist/api/ -r
+            - cp $CODEBUILD_SRC_DIR_FrontendBuild/* /dist/static/ -r
+            - echo "{\"buildDate\":\"`date`\",\"packageVersion\":\"${ver}\",\"buildNumber\":\"${CODEBUILD_BUILD_NUMBER}\"}" > /dist/static/buildInfo.json
+            - echo "Tagging with version ${ver} and setting build number to ${CODEBUILD_BUILD_NUMBER}"
+            - cd /dist/
+            - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 930156663175.dkr.ecr.us-east-1.amazonaws.com
+            - docker build -t aacd -t 930156663175.dkr.ecr.us-east-1.amazonaws.com/utahultra:${BUILD_TAG} -t 930156663175.dkr.ecr.us-east-1.amazonaws.com/utahultra:${CODEBUILD_BUILD_NUMBER} .
+            - docker push 930156663175.dkr.ecr.us-east-1.amazonaws.com/utahultra
+artifacts:
+    base-directory: /dist
+    files:
+        - "**/*"

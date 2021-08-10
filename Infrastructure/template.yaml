@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Multi level base path mapping
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Domian name for api
+  ZoneId:
+    Type: String
+    Description: Zone ID 
+    Default: none
+  CertArn:
+    Type: String
+    Description: Certificate ARN
+    Default: none
+  # SecurityGroup1:
+  #   Type: AWS::EC2::SecurityGroup::Id
+  #   Description: Security group for API (To access rds?)
+  # SecurityGroup2:
+  #   Type: AWS::EC2::SecurityGroup::Id
+  #   Description: Security group for API (To access rds?)
+  # Subnet1:
+  #   Type: AWS::EC2::Subnet::Id
+  #   Description: Subnet for api (To access rds?)
+  # Subnet2:
+  #   Type: AWS::EC2::Subnet::Id
+  #   Description: Subnet for api (To access rds?)
+  SSMPath:
+    Type: String
+    Description: Base path in SSM the api will read config from
+  PoolID:
+    Type: String
+    Description: Id (NOT THE ARN) of the user pool
+    
+
+Resources:
+  CustomDomainName: # Creates the domain name
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations: 
+        - EndpointType: REGIONAL
+          CertificateArn: !Ref CertArn
+
+  DomainRecordSet: # Creates a record set in the hosted zone for the domain
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Name: !Ref DomainName
+      HostedZoneId: !Ref ZoneId
+      AliasTarget: 
+        DNSName: !GetAtt CustomDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt CustomDomainName.RegionalHostedZoneId
+      Type: A
+
+
+
+
+  APIMapping: # Creates the mapping for Reporting V1
+    Type: AWS::ApiGatewayV2::ApiMapping
+    DependsOn: API
+    Properties: 
+      ApiId: !Ref API
+      ApiMappingKey: "api"
+      DomainName: !Ref DomainName
+      Stage: !Ref API.Stage
+
+  API: # endpoint
+    Type: AWS::Serverless::Api
+    Properties:
+      Description: !Sub "Unified API for ${DomainName}"
+      Name: !Sub "Unified API for ${DomainName}"
+      StageName: Prod
+      EndpointConfiguration:
+        Type: REGIONAL
+        x-amazon-apigateway-importexport-version: "1.0"
+
+
+  # APIFn:
+  #   Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  #   Properties:
+  #     PackageType: Image
+  #     Timeout: 20
+  #     MemorySize: 256
+  #     Events:
+  #       API:
+  #         Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+  #         Properties:
+  #           RestApiId: !Ref API
+  #           Path: /{proxy+}
+  #           Method: any
+  #     Environment:
+  #       Variables:
+  #         SSMPATH: !Ref SSMPath
+  #         LAMBDA: "TRUE"
+  #     VpcConfig:
+  #       SecurityGroupIds:
+  #           - !Ref SecurityGroup1
+  #           - !Ref SecurityGroup2
+  #       SubnetIds:
+  #           - !Ref Subnet1
+  #           - !Ref Subnet2
+  #     Policies:
+  #     - Statement:
+  #       - Effect: Allow
+  #         Action:
+  #           - 'ssm:GetParametersByPath'
+  #           - 'ssm:GetParameter'
+  #           - 'ssm:PutParameter'
+  #         Resource:
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}' 
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}*' 
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}DataProtection/' 
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}DataProtection/*' 
+  #         Sid: PropertiesAccess
+  #       - Effect: Allow
+  #         Action:
+  #           - cognito-idp:AdminGetUser
+  #           - cognito-idp:AdminListGroupsForUser
+  #         Resource:
+  #           - !Sub 'arn:aws:cognito-idp:us-east-1:${AWS::AccountId}:userpool/${PoolID}'
+  #   Metadata:
+  #     DockerTag: dotnet5.0-v1
+  #     DockerContext: ../Backend
+  #     Dockerfile: Dockerfile
+  #     DockerBuildArgs:
+  #       SAM_BUILD_MODE: run
+
+  TransmitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../Backend/Transmit
+      Timeout: 20
+      Runtime: nodejs14.x
+      Handler: index.transmit_handler
+      Events:
+        SegmentEventQueryRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref API
+            Path: /transmit
+            Method: Post
+      # Environment:
+      #   Variables:
+      #     SSMPath: !Ref SSMPath
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #       - !Ref SecurityGroup1
+      #       - !Ref SecurityGroup2
+      #   SubnetIds:
+      #       - !Ref Subnet1
+      #       - !Ref Subnet2
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+            - 's3:*'
+          Resource:
+            - '*' # !GetAtt StaticHostingApp.Outputs.Bucket.Arn
+          Sid: PropertiesAccess
+
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../Backend/Query
+      Timeout: 20
+      Runtime: nodejs14.x
+      Handler: index.query_handler
+      Events:
+        SegmentEventQueryRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref API
+            Path: /get/{id}
+            Method: Get
+      # Environment:
+      #   Variables:
+      #     SSMPath: !Ref SSMPath
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #       - !Ref SecurityGroup1
+      #       - !Ref SecurityGroup2
+      #   SubnetIds:
+      #       - !Ref Subnet1
+      #       - !Ref Subnet2
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+            - 's3:*'
+          Resource:
+            - '*' # !GetAtt StaticHostingApp.Outputs.Bucket.Arn
+          Sid: PropertiesAccess
+
+  # EventStreamProjectFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: ../event-source/stream
+  #     Timeout: 200
+  #     Runtime: nodejs14.x
+  #     Handler: projection.projection_handler
+  #     Events:
+  #       SegmentEventQueryRequest:
+  #         Type: Api
+  #         Properties:
+  #           RestApiId: !Ref API
+  #           Path: /stream/project/{streamid}
+  #           Method: GET
+  #       SegmentEventQueryWithGeometryRequest:
+  #         Type: Api
+  #         Properties:
+  #           RestApiId: !Ref API
+  #           Path: /stream/project/{streamid}/{withGeometry}
+  #           Method: GET
+  #     Environment:
+  #       Variables:
+  #         SSMPath: !Ref SSMPath
+  #     VpcConfig:
+  #       SecurityGroupIds:
+  #           - !Ref SecurityGroup1
+  #           - !Ref SecurityGroup2
+  #       SubnetIds:
+  #           - !Ref Subnet1
+  #           - !Ref Subnet2
+  #     Policies:
+  #     - Statement:
+  #       - Effect: Allow
+  #         Action:
+  #           - 'ssm:GetParametersByPath'
+  #           - 'ssm:GetParameter'
+  #         Resource:
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}' 
+  #           - !Sub 'arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter${SSMPath}*' 
+  #         Sid: PropertiesAccess
+
+  StaticHostingApp:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./frontend.yaml
+      Parameters:
+        DomainName: !Ref CustomDomainName
+
+  # MVTApp:
+  #   Type: AWS::Serverless::Application
+  #   Properties:
+  #     Location: ./mvt-serverless.yaml
+  #     Parameters:
+  #       DomainName: !Ref CustomDomainName
+  #       SSMPath: !Ref SSMPath
+  #       SecurityGroup1: !Ref SecurityGroup1
+  #       SecurityGroup2: !Ref SecurityGroup2
+  #       Subnet1: !Ref Subnet1
+  #       Subnet2: !Ref Subnet2
+
+  # EventApp:
+  #   Type: AWS::Serverless::Application
+  #   Properties:
+  #     Location: ./event-processing.yaml
+  #     Parameters:
+  #       DomainName: !Ref CustomDomainName
+  #       SSMPath: !Ref SSMPath
+  #       SecurityGroup1: !Ref SecurityGroup1
+  #       SecurityGroup2: !Ref SecurityGroup2
+  #       Subnet1: !Ref Subnet1
+  #       Subnet2: !Ref Subnet2
+  #       RestApiId: !Ref API
+
